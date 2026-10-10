@@ -227,7 +227,15 @@ def validated_redirect_uri(client_id: str, redirect_uri: str) -> str:
     allowed = settings.client_redirect_uris.get(client_id, [])
 
     if redirect_uri not in allowed:
-        raise HTTPException(status_code=400, detail="등록되지 않은 사이트 이동 주소입니다.")
+        print("OAUTH REDIRECT CHECK FAILED")
+        print("CLIENT_ID:", repr(client_id))
+        print("REDIRECT_URI:", repr(redirect_uri))
+        print("ALLOWED_URIS:", repr(allowed))
+
+        raise HTTPException(
+            status_code=400,
+            detail="등록되지 않은 사이트 이동 주소입니다.",
+        )
 
     return redirect_uri
 
