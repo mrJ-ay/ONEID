@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ONEID 연결 확인</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="form-wrap"><section class="card">
+    <a class="brand" href="/">ONEID</a><p class="eyebrow">SECURE SIGN-IN</p><h1>사이트 연결 확인</h1>
+    <p id="clientName" class="intro">요청한 사이트를 확인하고 있습니다.</p>
+    <p id="scopes" class="scope-list"></p>
+    <div class="actions"><button id="approve" class="button" type="button" disabled>허용</button><button id="deny" class="button secondary" type="button" disabled>거부</button></div>
+    <p id="message" class="message" role="status"></p>
+  </section></main>
+  <script type="module" src="/consent.js"></script>
+</body>
+</html>

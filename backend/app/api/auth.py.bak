@@ -1,0 +1,483 @@
+from __future__ import annotations
+
+import re
+import sqlite3
+import uuid
+import base64
+import hashlib
+import secrets
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
+
+import httpx
+from fastapi import APIRouter, Header, HTTPException, status
+from jose import JWTError, jwt
+from pwdlib import PasswordHash
+from pydantic import BaseModel, Field
+from supabase import create_client
+
+from app.config import get_settings
+
+router = APIRouter(prefix="/api")
+settings = get_settings()
+password_hash = PasswordHash.recommended()
+
+
+class RegisterInput(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+    nickname: str = Field(min_length=1, max_length=20)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginInput(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RoleInput(BaseModel):
+    role: Literal["user", "admin"]
+
+
+class OAuthAuthorizeInput(BaseModel):
+    client_id: str = Field(min_length=2, max_length=64)
+    redirect_uri: str = Field(min_length=1, max_length=2048)
+    code_challenge: str = Field(min_length=43, max_length=128)
+    state: str = Field(min_length=16, max_length=256)
+
+
+class OAuthTokenInput(BaseModel):
+    client_id: str
+    redirect_uri: str
+    code: str
+    code_verifier: str = Field(min_length=43, max_length=128)
+
+
+def normalize_username(value: str) -> str:
+    return value.strip().casefold()
+
+
+def validate_username(value: str) -> str:
+    username = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{2,32}", username):
+        raise HTTPException(status_code=422, detail="사용자명은 영문, 숫자, 밑줄, 점, 하이픈으로 2~32자여야 합니다.")
+    return username
+
+
+def local_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(settings.local_db_path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("""
+        create table if not exists local_users (
+            user_id text primary key,
+            username text not null,
+            username_normalized text not null unique,
+            nickname text not null,
+            password_hash text not null,
+            role text not null default 'user' check (role in ('user', 'admin')),
+            created_at text not null
+        )
+    """)
+    connection.execute("""
+        create table if not exists oneid_oauth_codes (
+            code_hash text primary key,
+            user_id text not null,
+            client_id text not null,
+            redirect_uri text not null,
+            code_challenge text not null,
+            expires_at text not null
+        )
+    """)
+    connection.commit()
+    return connection
+
+
+def public_user(row: Any) -> dict[str, Any]:
+    return {
+        "id": row["user_id"],
+        "username": row["username"],
+        "nickname": row["nickname"],
+        "role": row["role"],
+        "is_admin": row["role"] == "admin",
+    }
+
+
+def local_issue_token(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": user_id, "iss": settings.oneid_issuer_url, "iat": now, "exp": now + timedelta(hours=2), "mode": "local"},
+        settings.oneid_jwt_secret,
+        algorithm="HS256",
+    )
+
+
+def local_user_from_token(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, settings.oneid_jwt_secret, algorithms=["HS256"], issuer=settings.oneid_issuer_url)
+    except JWTError as exc:
+        raise HTTPException(status_code=401, detail="로그인이 만료되었거나 유효하지 않습니다.") from exc
+    if payload.get("mode") != "local":
+        raise HTTPException(status_code=401, detail="유효하지 않은 개발용 로그인입니다.")
+    with local_connection() as db:
+        row = db.execute("select * from local_users where user_id = ?", (payload.get("sub"),)).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="계정을 찾을 수 없습니다.")
+    return public_user(row)
+
+
+def sso_issue_token(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": user_id, "iss": settings.oneid_issuer_url, "aud": "oneid-sites", "iat": now, "exp": now + timedelta(hours=2), "mode": "sso"},
+        settings.oneid_jwt_secret,
+        algorithm="HS256",
+    )
+
+
+def sso_user_from_token(token: str) -> dict[str, Any] | None:
+    try:
+        payload = jwt.decode(token, settings.oneid_jwt_secret, algorithms=["HS256"], issuer=settings.oneid_issuer_url, audience="oneid-sites")
+    except JWTError:
+        return None
+    if payload.get("mode") != "sso" or not payload.get("sub"):
+        return None
+    user_id = str(payload["sub"])
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            row = db.execute("select * from local_users where user_id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=401, detail="계정을 찾을 수 없습니다.")
+        return public_user(row)
+    try:
+        client = admin_client()
+        profiles = client.table("oneid_profiles").select("user_id,username,nickname").eq("user_id", user_id).limit(1).execute().data or []
+        if not profiles:
+            raise HTTPException(status_code=401, detail="ONEID 프로필을 찾을 수 없습니다.")
+        roles = client.table("oneid_roles").select("role").eq("user_id", user_id).limit(1).execute().data or []
+        profile = profiles[0]
+        role = roles[0]["role"] if roles else "user"
+        return {"id": profile["user_id"], "username": profile["username"], "nickname": profile["nickname"], "role": role, "is_admin": role == "admin"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="ONEID 계정 정보를 확인할 수 없습니다.") from exc
+
+
+def admin_client():
+    if not settings.supabase_enabled:
+        raise HTTPException(status_code=503, detail="Supabase 설정이 완료되지 않았습니다.")
+    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+
+def user_from_access_token(token: str) -> dict[str, Any]:
+    sso_user = sso_user_from_token(token)
+    if sso_user:
+        return sso_user
+    if not settings.supabase_enabled:
+        return local_user_from_token(token)
+    try:
+        response = httpx.get(
+            f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
+            headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            raise HTTPException(status_code=401, detail="로그인이 만료되었거나 유효하지 않습니다.")
+        user_id = response.json().get("id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="계정을 확인할 수 없습니다.")
+        client = admin_client()
+        profiles = client.table("oneid_profiles").select("user_id,username,nickname").eq("user_id", user_id).limit(1).execute().data or []
+        if not profiles:
+            raise HTTPException(status_code=401, detail="ONEID 프로필을 찾을 수 없습니다.")
+        roles = client.table("oneid_roles").select("role").eq("user_id", user_id).limit(1).execute().data or []
+        profile = profiles[0]
+        role = roles[0]["role"] if roles else "user"
+        return {"id": profile["user_id"], "username": profile["username"], "nickname": profile["nickname"], "role": role, "is_admin": role == "admin"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="계정 정보를 불러올 수 없습니다.") from exc
+
+
+def require_user(authorization: str | None) -> dict[str, Any]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return user_from_access_token(authorization.split(" ", 1)[1])
+
+
+def require_admin(authorization: str | None) -> dict[str, Any]:
+    user = require_user(authorization)
+    if not user["is_admin"]:
+        raise HTTPException(status_code=403, detail="ONEID 관리자만 사용할 수 있습니다.")
+    return user
+
+
+def internal_auth_email() -> str:
+    # Supabase password auth accepts email/phone identifiers. This private alias
+    # keeps ONEID's public sign-in name as the shared username.
+    return f"oneid_{uuid.uuid4().hex}@accounts.oneid.invalid"
+
+
+def validated_redirect_uri(client_id: str, redirect_uri: str) -> str:
+    if redirect_uri not in settings.client_redirect_uris.get(client_id, []):
+        raise HTTPException(status_code=400, detail="등록되지 않은 사이트 이동 주소입니다.")
+    return redirect_uri
+
+
+def add_query(uri: str, values: dict[str, str]) -> str:
+    parts = urlsplit(uri)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update(values)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+@router.get("/public-config")
+def public_config() -> dict[str, str]:
+    return {
+        "auth_mode": "supabase" if settings.supabase_enabled else "local",
+        "supabase_url": settings.supabase_url if settings.supabase_enabled else "",
+        "supabase_anon_key": settings.supabase_anon_key if settings.supabase_enabled else "",
+    }
+
+
+@router.post("/auth/register", status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterInput) -> dict[str, Any]:
+    username = validate_username(payload.username)
+    normalized = normalize_username(username)
+    nickname = payload.nickname.strip()
+    if not nickname:
+        raise HTTPException(status_code=422, detail="닉네임을 입력해 주세요.")
+
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            exists = db.execute("select 1 from local_users where username_normalized = ?", (normalized,)).fetchone()
+            if exists:
+                raise HTTPException(status_code=409, detail="이미 사용 중인 사용자명입니다.")
+            role = "admin" if settings.oneid_bootstrap_admin_username and normalized == normalize_username(settings.oneid_bootstrap_admin_username) else "user"
+            user_id = str(uuid.uuid4())
+            try:
+                db.execute(
+                    "insert into local_users (user_id, username, username_normalized, nickname, password_hash, role, created_at) values (?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, username, normalized, nickname, password_hash.hash(payload.password), role, datetime.now(timezone.utc).isoformat()),
+                )
+                db.commit()
+            except sqlite3.IntegrityError as exc:
+                raise HTTPException(status_code=409, detail="이미 사용 중인 사용자명입니다.") from exc
+            row = db.execute("select * from local_users where user_id = ?", (user_id,)).fetchone()
+        return {"message": "ONEID 계정이 만들어졌습니다.", "user": public_user(row), "auth_mode": "local"}
+
+    client = admin_client()
+    try:
+        profile_check = client.table("oneid_profiles").select("user_id").eq("username_normalized", normalized).limit(1).execute()
+        if profile_check.data:
+            raise HTTPException(status_code=409, detail="이미 사용 중인 사용자명입니다.")
+        auth_email = internal_auth_email()
+        created = client.auth.admin.create_user({
+            "email": auth_email,
+            "password": payload.password,
+            "email_confirm": True,
+            "user_metadata": {"username": username, "nickname": nickname, "name": nickname},
+        })
+        auth_user = created.user
+        if not auth_user:
+            raise HTTPException(status_code=502, detail="계정을 만들지 못했습니다.")
+        try:
+            client.table("oneid_profiles").insert({
+                "user_id": str(auth_user.id),
+                "username": username,
+                "username_normalized": normalized,
+                "nickname": nickname,
+                "auth_login_email": auth_email,
+            }).execute()
+            client.table("oneid_roles").insert({"user_id": str(auth_user.id), "role": "user"}).execute()
+        except Exception:
+            client.auth.admin.delete_user(str(auth_user.id))
+            raise
+        return {"message": "ONEID 계정이 만들어졌습니다. 로그인해 주세요.", "user": {"id": str(auth_user.id), "username": username, "nickname": nickname, "role": "user", "is_admin": False}, "auth_mode": "supabase"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="계정을 만들지 못했습니다. 사용자명이 이미 쓰이고 있는지 확인해 주세요.") from exc
+
+
+@router.post("/auth/login")
+def login(payload: LoginInput) -> dict[str, Any]:
+    normalized = normalize_username(payload.username)
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            row = db.execute("select * from local_users where username_normalized = ?", (normalized,)).fetchone()
+        if not row or not password_hash.verify(payload.password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="사용자명 또는 비밀번호가 올바르지 않습니다.")
+        return {"access_token": local_issue_token(row["user_id"]), "refresh_token": "", "user": public_user(row), "auth_mode": "local"}
+
+    try:
+        client = admin_client()
+        rows = client.table("oneid_profiles").select("user_id,username,nickname,auth_login_email").eq("username_normalized", normalized).limit(1).execute().data or []
+        if not rows:
+            raise HTTPException(status_code=401, detail="사용자명 또는 비밀번호가 올바르지 않습니다.")
+        profile = rows[0]
+        response = httpx.post(
+            f"{settings.supabase_url.rstrip('/')}/auth/v1/token?grant_type=password",
+            headers={"apikey": settings.supabase_anon_key, "Content-Type": "application/json"},
+            json={"email": profile["auth_login_email"], "password": payload.password},
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            raise HTTPException(status_code=401, detail="사용자명 또는 비밀번호가 올바르지 않습니다.")
+        session = response.json()
+        role_rows = client.table("oneid_roles").select("role").eq("user_id", profile["user_id"]).limit(1).execute().data or []
+        role = role_rows[0]["role"] if role_rows else "user"
+        return {
+            "access_token": session["access_token"],
+            "refresh_token": session["refresh_token"],
+            "token_type": session.get("token_type", "bearer"),
+            "expires_in": session.get("expires_in"),
+            "user": {"id": profile["user_id"], "username": profile["username"], "nickname": profile["nickname"], "role": role, "is_admin": role == "admin"},
+            "auth_mode": "supabase",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="로그인 서비스에 연결할 수 없습니다.") from exc
+
+
+@router.get("/auth/me")
+def me(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return require_user(authorization)
+
+
+@router.post("/oauth/authorize")
+def oauth_authorize(payload: OAuthAuthorizeInput, authorization: str | None = Header(default=None)) -> dict[str, str]:
+    user = require_user(authorization)
+    redirect_uri = validated_redirect_uri(payload.client_id, payload.redirect_uri)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", payload.code_challenge):
+        raise HTTPException(status_code=400, detail="PKCE code challenge 형식이 올바르지 않습니다.")
+
+    code = secrets.token_urlsafe(32)
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=2)
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            db.execute("delete from oneid_oauth_codes where expires_at <= ?", (datetime.now(timezone.utc).isoformat(),))
+            db.execute(
+                "insert into oneid_oauth_codes (code_hash,user_id,client_id,redirect_uri,code_challenge,expires_at) values (?,?,?,?,?,?)",
+                (code_hash, user["id"], payload.client_id, redirect_uri, payload.code_challenge, expires_at.isoformat()),
+            )
+    else:
+        try:
+            admin_client().rpc("issue_oneid_oauth_code", {
+                "p_code_hash": code_hash,
+                "p_user_id": user["id"],
+                "p_client_id": payload.client_id,
+                "p_redirect_uri": redirect_uri,
+                "p_code_challenge": payload.code_challenge,
+                "p_expires_at": expires_at.isoformat(),
+            }).execute()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="ONEID 로그인 연결을 시작하지 못했습니다.") from exc
+
+    return {"redirect_uri": add_query(redirect_uri, {"code": code, "state": payload.state})}
+
+
+@router.post("/oauth/token")
+def oauth_token(payload: OAuthTokenInput) -> dict[str, Any]:
+    redirect_uri = validated_redirect_uri(payload.client_id, payload.redirect_uri)
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", payload.code_verifier):
+        raise HTTPException(status_code=400, detail="PKCE verifier 형식이 올바르지 않습니다.")
+    expected_challenge = base64.urlsafe_b64encode(hashlib.sha256(payload.code_verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+    code_hash = hashlib.sha256(payload.code.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "select user_id,code_challenge from oneid_oauth_codes where code_hash=? and client_id=? and redirect_uri=? and expires_at>?",
+                (code_hash, payload.client_id, redirect_uri, now.isoformat()),
+            ).fetchone()
+            valid_challenge = bool(row and secrets.compare_digest(row["code_challenge"], expected_challenge))
+            if valid_challenge:
+                db.execute("delete from oneid_oauth_codes where code_hash=?", (code_hash,))
+                db.commit()
+            else:
+                db.rollback()
+        user_id = row["user_id"] if row and valid_challenge else None
+    else:
+        try:
+            redeemed = admin_client().rpc("redeem_oneid_oauth_code", {
+                "p_code_hash": code_hash,
+                "p_client_id": payload.client_id,
+                "p_redirect_uri": redirect_uri,
+                "p_code_challenge": expected_challenge,
+            }).execute().data or []
+            user_id = redeemed[0]["user_id"] if redeemed else None
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="ONEID 로그인 코드를 확인하지 못했습니다.") from exc
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="로그인 코드가 만료되었거나 올바르지 않습니다.")
+
+    user = sso_user_from_token(sso_issue_token(user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="ONEID 계정을 확인할 수 없습니다.")
+    return {"access_token": sso_issue_token(user_id), "token_type": "bearer", "expires_in": 7200, "user": user}
+
+
+@router.get("/admin/users")
+def admin_users(authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    require_admin(authorization)
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            rows = db.execute("select * from local_users order by created_at desc").fetchall()
+        return [public_user(row) for row in rows]
+
+    try:
+        client = admin_client()
+        profiles = client.table("oneid_profiles").select("user_id,username,nickname,created_at").order("created_at", desc=True).execute().data or []
+        roles = client.table("oneid_roles").select("user_id,role").execute().data or []
+        role_by_user = {row["user_id"]: row["role"] for row in roles}
+        return [
+            {"id": row["user_id"], "username": row["username"], "nickname": row["nickname"], "role": role_by_user.get(row["user_id"], "user"), "is_admin": role_by_user.get(row["user_id"], "user") == "admin", "created_at": row["created_at"]}
+            for row in profiles
+        ]
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="ONEID 계정 목록을 불러오지 못했습니다.") from exc
+
+
+@router.patch("/admin/users/{user_id}/role")
+def set_user_role(user_id: str, payload: RoleInput, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    admin = require_admin(authorization)
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=409, detail="현재 로그인한 관리자의 권한은 여기서 변경할 수 없습니다.")
+
+    if not settings.supabase_enabled:
+        with local_connection() as db:
+            target = db.execute("select user_id from local_users where user_id = ?", (user_id,)).fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+            if payload.role == "user":
+                count = db.execute("select count(*) from local_users where role = 'admin'").fetchone()[0]
+                target_role = db.execute("select role from local_users where user_id = ?", (user_id,)).fetchone()[0]
+                if target_role == "admin" and count <= 1:
+                    raise HTTPException(status_code=409, detail="마지막 관리자의 권한은 해제할 수 없습니다.")
+            db.execute("update local_users set role = ? where user_id = ?", (payload.role, user_id))
+            db.commit()
+        return {"id": user_id, "role": payload.role, "is_admin": payload.role == "admin"}
+
+    try:
+        client = admin_client()
+        target = client.table("oneid_profiles").select("user_id").eq("user_id", user_id).limit(1).execute().data or []
+        if not target:
+            raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+        if payload.role == "user":
+            admins = client.table("oneid_roles").select("user_id", count="exact").eq("role", "admin").execute()
+            current_role = client.table("oneid_roles").select("role").eq("user_id", user_id).limit(1).execute().data or []
+            if current_role and current_role[0]["role"] == "admin" and admins.count is not None and admins.count <= 1:
+                raise HTTPException(status_code=409, detail="마지막 관리자의 권한은 해제할 수 없습니다.")
+        client.table("oneid_roles").upsert({"user_id": user_id, "role": payload.role}, on_conflict="user_id").execute()
+        return {"id": user_id, "role": payload.role, "is_admin": payload.role == "admin"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="ONEID 관리자 권한을 변경하지 못했습니다.") from exc

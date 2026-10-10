@@ -1,0 +1,29 @@
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from app.api.auth import router as auth_router
+from app.config import get_settings
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+FRONTEND_DIR = ROOT_DIR / "frontend"
+
+app = FastAPI(title="ONEID", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+app.include_router(auth_router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok", "service": "oneid"}
+
+
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

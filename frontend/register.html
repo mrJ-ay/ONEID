@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ONEID 계정 만들기</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">ONEID</a><nav><a href="/login.html">로그인</a></nav></header>
+  <main class="form-wrap">
+    <section class="card">
+      <p class="eyebrow">ONE ACCOUNT</p><h1>ONEID 계정 만들기</h1>
+      <form id="registerForm">
+        <label>공통 사용자명<input id="username" name="username" autocomplete="username" minlength="2" maxlength="32" pattern="[A-Za-z0-9_.-]{2,32}" required><small>영문, 숫자, 밑줄, 점, 하이픈으로 2~32자</small></label>
+        <label>공통 닉네임<input id="nickname" name="nickname" autocomplete="nickname" minlength="1" maxlength="20" required></label>
+        <label>비밀번호<input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small>8자 이상</small></label>
+        <button class="button full" type="submit">계정 만들기</button>
+      </form>
+      <p id="message" class="message" role="status"></p>
+      <p class="foot">이미 계정이 있나요? <a href="/login.html">로그인</a></p>
+    </section>
+  </main>
+  <script type="module" src="register.js"></script>
+</body>
+</html>

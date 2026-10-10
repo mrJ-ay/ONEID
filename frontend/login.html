@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ONEID 로그인</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">ONEID</a><nav><a href="/register.html">계정 만들기</a></nav></header>
+  <main class="form-wrap">
+    <section class="card">
+      <p class="eyebrow">WELCOME BACK</p><h1>ONEID 로그인</h1>
+      <form id="loginForm">
+        <label>사용자명<input id="username" name="username" autocomplete="username" minlength="2" maxlength="32" required></label>
+        <label>비밀번호<input id="password" name="password" type="password" autocomplete="current-password" required></label>
+        <button class="button full" type="submit">로그인</button>
+      </form>
+      <p id="message" class="message" role="status"></p>
+      <p class="foot">처음 오셨나요? <a id="registerLink" href="/register.html">ONEID 계정 만들기</a></p>
+    </section>
+  </main>
+  <script type="module" src="login.js"></script>
+</body>
+</html>
