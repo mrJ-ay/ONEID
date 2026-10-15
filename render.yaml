@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: oneid
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: DATABASE_URL
+        sync: false          # 로컬 .env 와 같은 Neon 연결 문자열
+      - key: ONEID_JWT_SECRET
+        generateValue: true  # Render가 무작위 비밀키 생성
+      - key: ONEID_ISSUER_URL
+        sync: false          # 배포된 ONEID 주소, 예: https://oneid.onrender.com
+      - key: ONEID_ALLOWED_ORIGINS
+        sync: false          # 콤마 구분, 예: https://oneid.onrender.com,https://neon-strip.onrender.com,https://vegas-slots-2izy.onrender.com
+      - key: ONEID_CLIENT_REDIRECT_URIS
+        sync: false          # JSON, 예: {"neonstrip":["https://fakepress-1.onrender.com/","https://inkvoid-eoqx.onrender.com/","https://pigsty.onrender.com/","https://nova-hmqj.onrender.com/","https://nova-hmqj.onrender.com/login.html"]}
