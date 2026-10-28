@@ -40,7 +40,7 @@ small { display: block; margin-top: 6px; color: #7a857c; font-size: 11px; font-w
 .admin-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; padding: 36px; background: #fff; border: 1px solid #e0e5de; border-radius: 18px; box-shadow: 0 18px 50px #1727190d; margin-bottom: 18px; }
 .admin-head h1 { font-size: clamp(26px, 4vw, 36px); margin: 4px 0 10px; }
 .admin-head .intro { margin: 0; font-size: 14px; }
-.admin-stats { display: grid; grid-template-columns: repeat(4, minmax(84px, 1fr)); gap: 10px; }
+.admin-stats { display: grid; grid-template-columns: repeat(3, minmax(84px, 1fr)); gap: 10px; }
 .admin-stats > div { background: #f4f6f3; border: 1px solid #e3e8e1; border-radius: 12px; padding: 14px 16px; text-align: center; }
 .admin-stats strong { display: block; font-size: 24px; color: #2b4432; }
 .admin-stats span { font-size: 11px; color: #6c776e; font-weight: 600; }
