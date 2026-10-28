@@ -11,6 +11,17 @@
   <main class="form-wrap"><section class="card">
     <p class="eyebrow">YOUR ONEID</p><h1>계정 정보</h1>
     <dl id="profile" class="profile" hidden><dt>사용자명</dt><dd id="username"></dd><dt>닉네임</dt><dd id="nickname"></dd><dt>권한</dt><dd id="role"></dd></dl>
+
+    <form id="nicknameForm" hidden style="margin: 18px 0 12px; padding-top: 16px; border-top: 1px solid #e6ebe4;">
+      <label for="newNickname" style="margin-top: 0;">닉네임 변경
+        <div style="display: flex; gap: 8px; margin-top: 7px;">
+          <input id="newNickname" type="text" minlength="1" maxlength="20" required placeholder="새 닉네임 (1~20자)" style="margin-top: 0; flex: 1;">
+          <button id="nicknameSubmit" class="button" type="submit" style="white-space: nowrap;">변경</button>
+        </div>
+        <small id="nicknameCooldownNote">닉네임은 변경 후 3일 동안 다시 바꿀 수 없습니다.</small>
+      </label>
+    </form>
+
     <div id="adminBox" class="actions" hidden><a class="button full" href="/admin.html">총괄관리자 콘솔 열기 →</a></div>
     <div id="logoutBox" class="actions" hidden><button id="cardLogout" class="button secondary full" type="button">로그아웃</button></div>
     <p id="message" class="message" role="status">계정을 확인하는 중…</p>

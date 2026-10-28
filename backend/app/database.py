@@ -36,8 +36,14 @@ def initialize_database() -> None:
                     global_suspended BOOLEAN NOT NULL DEFAULT FALSE,
                     suspension_reason TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    nickname_changed_at TIMESTAMPTZ
                 )
+            """)
+
+            cur.execute("""
+                ALTER TABLE oneid_users
+                ADD COLUMN IF NOT EXISTS nickname_changed_at TIMESTAMPTZ
             """)
 
             cur.execute("""

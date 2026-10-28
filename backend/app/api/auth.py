@@ -41,6 +41,13 @@ class RoleInput(BaseModel):
     role: Literal["user", "admin"]
 
 
+class NicknameInput(BaseModel):
+    nickname: str = Field(min_length=1, max_length=20)
+
+
+NICKNAME_COOLDOWN = timedelta(days=3)
+
+
 class OAuthAuthorizeInput(BaseModel):
     client_id: str = Field(min_length=2, max_length=64)
     redirect_uri: str = Field(min_length=1, max_length=2048)
@@ -85,12 +92,16 @@ def validate_username(value: str) -> str:
 
 def public_user(row: Any) -> dict[str, Any]:
     role = row["role"]
+    changed_at = row.get("nickname_changed_at") if isinstance(row, dict) else getattr(row, "nickname_changed_at", None)
+    next_change_at = (changed_at + NICKNAME_COOLDOWN).isoformat() if changed_at else None
     return {
         "id": row["user_id"],
         "username": row["username"],
         "nickname": row["nickname"],
         "role": role,
         "is_admin": role == "admin",
+        "nickname_changed_at": changed_at.isoformat() if changed_at else None,
+        "nickname_next_change_at": next_change_at,
     }
 
 
@@ -380,6 +391,69 @@ def login(payload: LoginInput) -> dict[str, Any]:
 @router.get("/auth/me")
 def me(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     return require_user(authorization)
+
+
+@router.patch("/auth/nickname")
+def update_nickname(
+    payload: NicknameInput,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = require_user(authorization)
+    new_nickname = payload.nickname.strip()
+    if not new_nickname or len(new_nickname) > 20:
+        raise HTTPException(status_code=422, detail="닉네임은 1~20자여야 합니다.")
+
+    now = datetime.now(timezone.utc)
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM oneid_users WHERE user_id = %s FOR UPDATE",
+            (user["id"],),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+
+        if row["nickname"] == new_nickname:
+            raise HTTPException(status_code=400, detail="현재 사용 중인 닉네임과 동일합니다.")
+
+        changed_at = row.get("nickname_changed_at")
+        if changed_at is not None:
+            if changed_at.tzinfo is None:
+                changed_at = changed_at.replace(tzinfo=timezone.utc)
+            next_allowed = changed_at + NICKNAME_COOLDOWN
+            if now < next_allowed:
+                rem = int((next_allowed - now).total_seconds())
+                days = rem // 86400
+                hours = (rem % 86400) // 3600
+                mins = max(1, (rem % 3600) // 60)
+                parts = []
+                if days:
+                    parts.append(f"{days}일")
+                if hours:
+                    parts.append(f"{hours}시간")
+                if not days and mins:
+                    parts.append(f"{mins}분")
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"닉네임은 3일에 한 번만 변경할 수 있습니다. ({' '.join(parts)} 후 변경 가능)",
+                )
+
+        updated = conn.execute(
+            """
+            UPDATE oneid_users
+            SET nickname = %s,
+                nickname_changed_at = %s,
+                updated_at = %s
+            WHERE user_id = %s
+            RETURNING *
+            """,
+            (new_nickname, now, now, user["id"]),
+        ).fetchone()
+
+    return {
+        "message": "닉네임이 변경되었습니다.",
+        "user": public_user(updated),
+    }
 
 
 # --------------------------------------------------
