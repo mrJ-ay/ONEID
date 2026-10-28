@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ONEID · 통합 로그인</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261028b">
 </head>
 <body>
   <header class="topbar">
@@ -27,7 +27,7 @@
     <section class="site-list" aria-label="연결 예정 사이트"><span>PIGSTY</span><span>FAKEPRESS</span><span>NOVA</span><span>INKVOID</span><span>NEON STRIP</span></section>
   </main>
   <script type="module">
-    import { api } from "./common.js";
+    import { api } from "./common.js?v=20261028b";
     const token = localStorage.getItem("oneid_local_access_token");
     if (token) {
       try {
@@ -35,12 +35,12 @@
         const topNav = document.querySelector("#topNav");
         const heroActions = document.querySelector("#heroActions");
         topNav.innerHTML = `
-          <a href="/account.html">${user.nickname}님 (내 계정)</a>
+          <a href="/account.html">${user.nickname}님 (내 계정 · 닉네임 변경)</a>
           ${user.is_admin ? '<a href="/admin.html"><strong>총괄관리자</strong></a>' : ""}
           <button id="topLogout" class="link-button" type="button">로그아웃</button>
         `;
         heroActions.innerHTML = `
-          <a class="button" href="/account.html">내 계정 정보</a>
+          <a class="button" href="/account.html">내 계정 / 닉네임 변경</a>
           ${user.is_admin ? '<a class="button secondary" href="/admin.html">총괄관리자 페이지 →</a>' : ""}
           <button id="heroLogout" class="button secondary" type="button">로그아웃</button>
         `;
