@@ -7,15 +7,45 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="/">ONEID</a><nav><a href="/login.html">로그인</a><a href="/register.html">계정 만들기</a></nav></header>
+  <header class="topbar">
+    <a class="brand" href="/">ONEID</a>
+    <nav id="topNav">
+      <a href="/login.html">로그인</a>
+      <a href="/register.html">계정 만들기</a>
+    </nav>
+  </header>
   <main class="hero-wrap">
     <section class="hero">
       <p class="eyebrow">ONE ACCOUNT · ALL YOUR SITES</p>
       <h1>여러 사이트의 로그인을<br><span>ONEID 하나로</span></h1>
       <p class="intro">공통 사용자명과 비밀번호로 로그인하고, 같은 닉네임과 계정을 연결합니다.</p>
-      <div class="actions"><a class="button" href="/register.html">ONEID 만들기</a><a class="button secondary" href="/login.html">로그인</a></div>
+      <div class="actions" id="heroActions">
+        <a class="button" href="/register.html">ONEID 만들기</a>
+        <a class="button secondary" href="/login.html">로그인</a>
+      </div>
     </section>
-    <section class="site-list" aria-label="연결 예정 사이트"><span>PIGSTY</span><span>FAKEPRESS</span><span>NOVA</span><span>INKVOID</span></section>
+    <section class="site-list" aria-label="연결 예정 사이트"><span>PIGSTY</span><span>FAKEPRESS</span><span>NOVA</span><span>INKVOID</span><span>NEON STRIP</span></section>
   </main>
+  <script type="module">
+    import { api } from "./common.js";
+    const token = localStorage.getItem("oneid_local_access_token");
+    if (token) {
+      try {
+        const user = await api("/api/auth/me", { token });
+        const topNav = document.querySelector("#topNav");
+        const heroActions = document.querySelector("#heroActions");
+        topNav.innerHTML = `
+          <a href="/account.html">${user.nickname}님 (내 계정)</a>
+          ${user.is_admin ? '<a href="/admin.html"><strong>총괄관리자</strong></a>' : ""}
+        `;
+        heroActions.innerHTML = `
+          <a class="button" href="/account.html">내 계정 정보</a>
+          ${user.is_admin ? '<a class="button secondary" href="/admin.html">총괄관리자 페이지 →</a>' : ""}
+        `;
+      } catch {
+        localStorage.removeItem("oneid_local_access_token");
+      }
+    }
+  </script>
 </body>
 </html>
