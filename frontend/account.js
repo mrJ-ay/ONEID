@@ -3,6 +3,7 @@ import { api, initOneID, showMessage } from "./common.js";
 const message = document.querySelector("#message");
 const profile = document.querySelector("#profile");
 const adminBox = document.querySelector("#adminBox");
+const logoutBox = document.querySelector("#logoutBox");
 const adminNavLink = document.querySelector("#adminNavLink");
 let supabase = null;
 let authMode = "local";
@@ -23,6 +24,7 @@ try {
   document.querySelector("#nickname").textContent = user.nickname;
   document.querySelector("#role").textContent = user.is_admin ? "관리자" : "사용자";
   profile.hidden = false;
+  logoutBox.hidden = false;
   if (user.is_admin) {
     adminBox.hidden = false;
     adminNavLink.hidden = false;
@@ -33,8 +35,11 @@ try {
   if (error.message === "로그인이 필요합니다.") setTimeout(() => location.assign("/login.html"), 700);
 }
 
-document.querySelector("#logout").addEventListener("click", async () => {
+async function handleLogout() {
   if (authMode === "supabase" && supabase) await supabase.auth.signOut();
   localStorage.removeItem("oneid_local_access_token");
   location.assign("/");
-});
+}
+
+document.querySelector("#logout").addEventListener("click", handleLogout);
+document.querySelector("#cardLogout")?.addEventListener("click", handleLogout);

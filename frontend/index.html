@@ -37,11 +37,19 @@
         topNav.innerHTML = `
           <a href="/account.html">${user.nickname}님 (내 계정)</a>
           ${user.is_admin ? '<a href="/admin.html"><strong>총괄관리자</strong></a>' : ""}
+          <button id="topLogout" class="link-button" type="button">로그아웃</button>
         `;
         heroActions.innerHTML = `
           <a class="button" href="/account.html">내 계정 정보</a>
           ${user.is_admin ? '<a class="button secondary" href="/admin.html">총괄관리자 페이지 →</a>' : ""}
+          <button id="heroLogout" class="button secondary" type="button">로그아웃</button>
         `;
+        const doLogout = () => {
+          localStorage.removeItem("oneid_local_access_token");
+          location.reload();
+        };
+        document.querySelector("#topLogout")?.addEventListener("click", doLogout);
+        document.querySelector("#heroLogout")?.addEventListener("click", doLogout);
       } catch {
         localStorage.removeItem("oneid_local_access_token");
       }
