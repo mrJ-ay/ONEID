@@ -2,6 +2,8 @@ import { api, initOneID, showMessage } from "./common.js";
 
 const message = document.querySelector("#message");
 const profile = document.querySelector("#profile");
+const adminBox = document.querySelector("#adminBox");
+const adminNavLink = document.querySelector("#adminNavLink");
 let supabase = null;
 let authMode = "local";
 let localToken = localStorage.getItem("oneid_local_access_token");
@@ -21,6 +23,10 @@ try {
   document.querySelector("#nickname").textContent = user.nickname;
   document.querySelector("#role").textContent = user.is_admin ? "관리자" : "사용자";
   profile.hidden = false;
+  if (user.is_admin) {
+    adminBox.hidden = false;
+    adminNavLink.hidden = false;
+  }
   message.textContent = "ONEID에 로그인되어 있습니다.";
 } catch (error) {
   showMessage(message, error.message || "계정 정보를 불러오지 못했습니다.", true);

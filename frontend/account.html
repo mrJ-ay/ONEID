@@ -7,10 +7,11 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="/">ONEID</a><nav><button id="logout" class="link-button" type="button">로그아웃</button></nav></header>
+  <header class="topbar"><a class="brand" href="/">ONEID</a><nav><a id="adminNavLink" href="/admin.html" hidden>총괄관리자</a><button id="logout" class="link-button" type="button">로그아웃</button></nav></header>
   <main class="form-wrap"><section class="card">
     <p class="eyebrow">YOUR ONEID</p><h1>계정 정보</h1>
     <dl id="profile" class="profile" hidden><dt>사용자명</dt><dd id="username"></dd><dt>닉네임</dt><dd id="nickname"></dd><dt>권한</dt><dd id="role"></dd></dl>
+    <div id="adminBox" class="actions" hidden><a class="button full" href="/admin.html">총괄관리자 콘솔 열기 →</a></div>
     <p id="message" class="message" role="status">계정을 확인하는 중…</p>
   </section></main>
   <script type="module" src="account.js"></script>

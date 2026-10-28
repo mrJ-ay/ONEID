@@ -700,3 +700,44 @@ def set_site_suspension(
         "suspended": payload.suspended,
         "reason": payload.reason if payload.suspended else None,
     }
+
+
+@router.get("/admin/sites")
+def admin_sites(
+    authorization: str | None = Header(default=None),
+) -> list[str]:
+    require_admin(authorization)
+    return list(settings.client_redirect_uris.keys())
+
+
+@router.delete("/admin/users/{user_id}")
+def delete_user(
+    user_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    admin = require_admin(authorization)
+    if user_id == admin["id"]:
+        raise HTTPException(
+            status_code=409,
+            detail="현재 로그인한 관리자 계정은 삭제할 수 없습니다.",
+        )
+    with get_connection() as conn:
+        target = conn.execute(
+            "SELECT user_id, role FROM oneid_users WHERE user_id = %s FOR UPDATE",
+            (user_id,),
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+        if target["role"] == "admin":
+            admin_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM oneid_users WHERE role = 'admin'"
+            ).fetchone()["count"]
+            if admin_count <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="마지막 관리자 계정은 삭제할 수 없습니다.",
+                )
+        conn.execute("DELETE FROM oneid_site_suspensions WHERE user_id = %s", (user_id,))
+        conn.execute("DELETE FROM oneid_oauth_codes WHERE user_id = %s", (user_id,))
+        conn.execute("DELETE FROM oneid_users WHERE user_id = %s", (user_id,))
+    return {"id": user_id, "deleted": True}
