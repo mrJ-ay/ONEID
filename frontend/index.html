@@ -10,6 +10,7 @@
   <header class="topbar">
     <a class="brand" href="/">ONEID</a>
     <nav id="topNav">
+      <a href="https://oneid-helpdesk.onrender.com" target="_blank" rel="noopener">고객센터</a>
       <a href="/login.html">로그인</a>
       <a href="/register.html">계정 만들기</a>
     </nav>
@@ -22,9 +23,10 @@
       <div class="actions" id="heroActions">
         <a class="button" href="/register.html">ONEID 만들기</a>
         <a class="button secondary" href="/login.html">로그인</a>
+        <a class="button secondary" href="https://oneid-helpdesk.onrender.com" target="_blank" rel="noopener">고객센터 / 정지 소명</a>
       </div>
     </section>
-    <section class="site-list" aria-label="연결 예정 사이트"><span>PIGSTY</span><span>FAKEPRESS</span><span>NOVA</span><span>INKVOID</span><span>NEON STRIP</span></section>
+    <section class="site-list" aria-label="연결 예정 사이트"><span>PIGSTY</span><span>FAKEPRESS</span><span>NOVA</span><span>INKVOID</span><span>NEON STRIP</span><span>HELPDESK</span></section>
   </main>
   <script type="module">
     import { api } from "./common.js?v=20261028b";
@@ -36,11 +38,13 @@
         const heroActions = document.querySelector("#heroActions");
         topNav.innerHTML = `
           <a href="/account.html">${user.nickname}님 (내 계정 · 닉네임 변경)</a>
+          <a href="https://oneid-helpdesk.onrender.com" target="_blank" rel="noopener">고객센터</a>
           ${user.is_admin ? '<a href="/admin.html"><strong>총괄관리자</strong></a>' : ""}
           <button id="topLogout" class="link-button" type="button">로그아웃</button>
         `;
         heroActions.innerHTML = `
           <a class="button" href="/account.html">내 계정 / 닉네임 변경</a>
+          <a class="button secondary" href="https://oneid-helpdesk.onrender.com" target="_blank" rel="noopener">고객센터</a>
           ${user.is_admin ? '<a class="button secondary" href="/admin.html">총괄관리자 페이지 →</a>' : ""}
           <button id="heroLogout" class="button secondary" type="button">로그아웃</button>
         `;
