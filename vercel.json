@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "oneid": {
+      "root": ".",
+      "entrypoint": "api/index.py",
+      "buildCommand": "pip install -r backend/requirements.txt"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "oneid"
+      }
+    }
+  ]
+}

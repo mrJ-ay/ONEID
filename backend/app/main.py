@@ -34,5 +34,6 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "oneid"}
 
 
-app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
