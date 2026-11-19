@@ -67,10 +67,30 @@ class Settings(BaseSettings):
                 "to redirect URI lists."
             )
 
-        return {
+        merged = {
             str(client): [str(uri) for uri in uris]
             for client, uris in value.items()
         }
+        builtin_uris = {
+            "assembly": [
+                "https://assembly-lovat.vercel.app/",
+                "https://assembly-lovat.vercel.app",
+                "http://localhost:3010/",
+                "http://127.0.0.1:3010/",
+            ],
+            "citizen-pass": [
+                "https://citizen-pass-beryl.vercel.app/",
+                "https://citizen-pass-beryl.vercel.app",
+                "http://localhost:3015/",
+                "http://127.0.0.1:3015/",
+            ],
+        }
+        for cid, ulist in builtin_uris.items():
+            cur = merged.setdefault(cid, [])
+            for u in ulist:
+                if u not in cur:
+                    cur.append(u)
+        return merged
 
 
 @lru_cache
